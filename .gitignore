@@ -1,3 +1,6 @@
 data/
 __pycache__
 checkpoints/
+
+samples/
+real_images/

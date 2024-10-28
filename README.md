@@ -16,3 +16,29 @@ When your code will be test, we will execute:
 ## Checkpoints
 Push the minimal amount of models in the folder *checkpoints*.
 
+## Precision and Recall Calculation
+To calculate the improved_precision_recall, you can use the following:
+```bash
+python improved_precision_recall.py path/to/real_images path/to/generated_images --conversion
+```
+e.g.
+```bash
+python improved_precision_recall.py data/MNIST/MNIST/raw/train-images-idx3-ubyte samples/ --conversion
+```
+
+The `--conversion` flag is used to convert the images to pngs and save them in a new dir called `real_images`.
+
+If the images are already in png format, you can omit the `--conversion` flag
+
+After running it once with the --conversion flag, you can run it again without the flag giving the path to real_images.
+
+```bash
+python improved_precision_recall.py real_images/ samples/
+```
+
+## FID Calculation
+To calculate the FID `real_images` should be first generated.
+Then you can use the following:
+```bash
+python -m pytorch_fid real_images/ samples/
+```
