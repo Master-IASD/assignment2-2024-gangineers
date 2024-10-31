@@ -7,8 +7,8 @@ import torch.nn as nn
 import torch.optim as optim
 
 
-from model import Generator, Discriminator
-from utils import D_train, G_train, save_models
+from model import Generator, Discriminator, Discriminator_KL
+from utils import D_train, D_train_KL,  G_train, G_train_KL, save_models
 
 
 
@@ -49,7 +49,7 @@ if __name__ == '__main__':
     print('Model Loading...')
     mnist_dim = 784
     G = torch.nn.DataParallel(Generator(g_output_dim = mnist_dim)).cuda()
-    D = torch.nn.DataParallel(Discriminator(mnist_dim)).cuda()
+    D = torch.nn.DataParallel(Discriminator_KL(mnist_dim)).cuda()
 
 
     # model = DataParallel(model).cuda()
@@ -65,17 +65,17 @@ if __name__ == '__main__':
     G_optimizer = optim.Adam(G.parameters(), lr = args.lr)
     D_optimizer = optim.Adam(D.parameters(), lr = args.lr)
 
-    print('Start Training :')
+    print('Start Training with (KL) :')
     
     n_epoch = args.epochs
     for epoch in trange(1, n_epoch+1, leave=True):           
         for batch_idx, (x, _) in enumerate(train_loader):
             x = x.view(-1, mnist_dim)
-            D_train(x, G, D, D_optimizer, criterion)
-            G_train(x, G, D, G_optimizer, criterion)
+            D_train_KL(x, G, D, D_optimizer)
+            G_train_KL(x, G, D, G_optimizer)
 
         if epoch % 10 == 0:
-            save_models(G, D, 'checkpoints')
+            save_models(G, D, 'checkpoints', prefix='KL_')
                 
     print('Training done')
 

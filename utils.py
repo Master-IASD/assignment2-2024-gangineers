@@ -1,7 +1,13 @@
 import torch
 import os
+import torch.nn as nn
 
 
+def weights_init(m):
+    if isinstance(m, nn.Linear):
+        nn.init.xavier_uniform_(m.weight)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
 
 def D_train(x, G, D, D_optimizer, criterion):
     #=======================Train the discriminator=======================#
@@ -31,6 +37,28 @@ def D_train(x, G, D, D_optimizer, criterion):
         
     return  D_loss.data.item()
 
+def D_train_KL(x, G, D, D_optimizer):
+    D.zero_grad()
+
+    # Real data
+    x_real = x.cuda()
+    T_real = D(x_real)
+    D_real_loss = -torch.mean(T_real)
+
+    # Fake data
+    z = torch.randn(x.shape[0], 100).cuda()
+    x_fake = G(z).detach()
+    T_fake = D(x_fake)
+    D_fake_loss = torch.mean(torch.exp(T_fake - 1))
+
+    # Total loss
+    D_loss = D_real_loss + D_fake_loss
+    D_loss.backward()
+    D_optimizer.step()
+
+    return D_loss.item()
+
+
 
 def G_train(x, G, D, G_optimizer, criterion):
     #=======================Train the generator=======================#
@@ -49,14 +77,28 @@ def G_train(x, G, D, G_optimizer, criterion):
         
     return G_loss.data.item()
 
+def G_train_KL(x, G, D, G_optimizer):
+    G.zero_grad()
+
+    z = torch.randn(x.shape[0], 100).cuda()
+    x_fake = G(z)
+    T_fake = D(x_fake)
+    G_loss = torch.mean(torch.exp(T_fake - 1))
+
+    G_loss.backward()
+    G_optimizer.step()
+
+    return G_loss.item()
 
 
-def save_models(G, D, folder):
-    torch.save(G.state_dict(), os.path.join(folder,'G.pth'))
-    torch.save(D.state_dict(), os.path.join(folder,'D.pth'))
+
+def save_models(G, D, folder, prefix=''):
+    torch.save(G.state_dict(), os.path.join(folder, prefix+'G.pth'))
+    torch.save(D.state_dict(), os.path.join(folder, prefix+'D.pth'))
 
 
-def load_model(G, folder):
-    ckpt = torch.load(os.path.join(folder,'G.pth'))
+def load_model(G, folder, prefix=''):
+    ckpt = torch.load(os.path.join(folder, prefix+'G.pth'))
+    print(f"Loading model from {os.path.join(folder, prefix+'G.pth')}") 
     G.load_state_dict({k.replace('module.', ''): v for k, v in ckpt.items()})
     return G
