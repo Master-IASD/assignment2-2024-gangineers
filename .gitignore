@@ -1,6 +1,7 @@
-data/
 __pycache__
-checkpoints/
+*.pdf
 
 samples/
 real_images/
+data/
+checkpoints/
