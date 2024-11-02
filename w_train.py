@@ -104,3 +104,5 @@ for epoch in tqdm(range(num_epochs)):
 # Save models
 torch.save(model_G.state_dict(), "checkpoints/W_G.pth")
 torch.save(model_C.state_dict(), "checkpoints/W_C.pth")
+# Commit line 1
+# Commit line 2
