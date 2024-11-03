@@ -55,7 +55,7 @@ def save_models(G, D, folder):
 
 
 def load_model(G, folder, model_file="G.pth"):
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
     ckpt = torch.load(os.path.join(folder, model_file), map_location=device)
     G.load_state_dict({k.replace("module.", ""): v for k, v in ckpt.items()})
     return G

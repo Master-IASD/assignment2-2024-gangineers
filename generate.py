@@ -27,7 +27,7 @@ if __name__ == "__main__":
     # Model Pipeline
     mnist_dim = 784
 
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
 
     model = Generator(g_output_dim=mnist_dim).to(device)
     model = load_model(model, "checkpoints", "W_G.pth")

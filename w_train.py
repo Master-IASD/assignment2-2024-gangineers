@@ -3,7 +3,7 @@ from tqdm import tqdm
 from model import Critic, Generator
 from torchvision import datasets, transforms
 
-num_epochs = 10
+num_epochs = 50
 n_critic = 5  # Number of Critic updates per Generator update
 clip_value = 0.01  # Weight clipping range
 batch_size = 64  # Adjust as needed
@@ -32,7 +32,7 @@ test_loader = torch.utils.data.DataLoader(
 )
 print("Dataset Loaded.")
 
-device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
 model_G = Generator(g_output_dim=784).to(device)
 model_C = Critic().to(device)
 
