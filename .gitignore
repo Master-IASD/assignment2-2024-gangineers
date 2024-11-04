@@ -4,5 +4,4 @@ __pycache__
 samples/
 real_images/
 data/
-checkpoints/
 draft*.py
