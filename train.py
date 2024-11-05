@@ -5,6 +5,8 @@ import argparse
 from torchvision import datasets, transforms
 import torch.nn as nn
 import torch.optim as optim
+import wandb
+import yaml
 
 
 from model import Generator, Discriminator
@@ -12,27 +14,19 @@ from utils import D_train, G_train, save_models
 
 
 if __name__ == "__main__":
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
-    parser = argparse.ArgumentParser(description="Train Normalizing Flow.")
-    parser.add_argument(
-        "--epochs", type=int, default=10, help="Number of epochs for training."
-    )
-    parser.add_argument(
-        "--lr_g",
-        type=float,
-        default=0.002,
-        help="The learning rate to use for training.",
-    )
-    parser.add_argument(
-        "--lr_d",
-        type=float,
-        default=0.0002,
-        help="The learning rate to use for training.",
-    )
-    parser.add_argument(
-        "--batch_size", type=int, default=64, help="Size of mini-batches for SGD"
+    config = yaml.safe_load(open("config.yaml"))
+
+    wandb.init(
+        project="gans-iasd",
+        config={**config},
     )
 
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
+
+    parser = argparse.ArgumentParser(description="Train Normalizing Flow.")
+    parser.add_argument(
+        "--config", type=str, default="config.yaml", help="path to config file"
+    )
     args = parser.parse_args()
 
     os.makedirs("checkpoints", exist_ok=True)
@@ -53,10 +47,10 @@ if __name__ == "__main__":
     )
 
     train_loader = torch.utils.data.DataLoader(
-        dataset=train_dataset, batch_size=args.batch_size, shuffle=True
+        dataset=train_dataset, batch_size=config["batch_size"], shuffle=True
     )
     test_loader = torch.utils.data.DataLoader(
-        dataset=test_dataset, batch_size=args.batch_size, shuffle=False
+        dataset=test_dataset, batch_size=config["batch_size"], shuffle=False
     )
     print("Dataset Loaded.")
 
@@ -68,27 +62,34 @@ if __name__ == "__main__":
     # if torch.cuda.is_available():
     # model = DataParallel(model).cuda()
     print("Model loaded.")
-    # Optimizer
 
-    # define loss
+    # loss
     criterion = nn.BCELoss()
 
-    # define optimizers
-    G_optimizer = optim.Adam(G.parameters(), lr=args.lr_g)
-    D_optimizer = optim.Adam(D.parameters(), lr=args.lr_d)
+    # optimizers
+    G_optimizer = optim.Adam(G.parameters(), lr=config["lr_g"])
+    D_optimizer = optim.Adam(D.parameters(), lr=config["lr_d"])
 
     print("Start Training :")
 
-    n_epoch = args.epochs
+    n_epoch = config["n_epoch"]
     for epoch in trange(1, n_epoch + 1, leave=True):
+        G_loss = 0.0
+        D_loss = 0.0
         for batch_idx, (x, _) in enumerate(train_loader):
             x = x.view(-1, mnist_dim)
-            D_train(x, G, D, D_optimizer, criterion)
-            G_train(x, G, D, G_optimizer, criterion)
+            D_loss += D_train(x, G, D, D_optimizer, criterion)
+            G_loss += G_train(x, G, D, G_optimizer, criterion)
+
+        D_loss /= len(train_loader.dataset)
+        G_loss /= len(train_loader.dataset)
+        wandb.log({"Discriminator Loss": D_loss, "Generator Loss": G_loss})
 
         if epoch % 10 == 0:
             save_models(
-                G, D, model_file=f"epoch_{epoch}_lrG_{args.lr_g}_lrD_{args.lr_d}"
+                G,
+                D,
+                model_file=f"epoch_{n_epoch}_lrG_{config["lr_g"]}_lrD_{config["lr_d"]}",
             )
 
     print("Training done")

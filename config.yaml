@@ -1,0 +1,4 @@
+n_epoch: 4
+lr_g: 0.0002
+lr_d: 0.0002
+batch_size: 64
