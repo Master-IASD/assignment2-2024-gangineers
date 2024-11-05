@@ -63,11 +63,16 @@ if __name__ == '__main__':
     mnist_dim = 784
 
     model = Generator(g_output_dim = mnist_dim).cuda()
-    model = load_model(model, 'checkpoints')
+    # model = load_model(model, 'checkpoints')
     model = torch.nn.DataParallel(model).cuda()
+
+    model_wgan = 120
+    # Load saved model weights
+    model_path = f'checkpoints_v2/WGAN_GP_{model_wgan}_G.pth'
+    model.load_state_dict(torch.load(model_path, weights_only=True))
     model.eval()
 
-    print('Model loaded.')
+    print(f'Model {model_path} loaded.')
 
 
 
