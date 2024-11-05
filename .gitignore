@@ -5,3 +5,7 @@ samples/
 real_images/
 data/
 draft*.py
+*.png
+samples_WGAN_GP_v2/
+*.json
+DRS_samples/
