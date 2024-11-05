@@ -1,6 +1,6 @@
 __pycache__
 *.pdf
-
+checkpoints/
 samples/
 real_images/
 data/
