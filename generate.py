@@ -88,7 +88,7 @@ if __name__ == "__main__":
 
     with torch.no_grad():
         for n_samples in tqdm(range(0, total_samples, batch_size)):
-            z = torch.randn(batch_size, 100, device=device)
+            z = torch.randn(args.batch_size, 100).cuda()
             x = model(z)
             x = x.reshape(batch_size, 28, 28)
             for k in range(x.shape[0]):
