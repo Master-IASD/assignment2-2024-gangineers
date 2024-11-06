@@ -11,7 +11,7 @@ config = yaml.safe_load(open("config_sweep.yaml"))
 config = config["parameters"]
 
 
-# Data Pipeline
+##################DATA PIPELINE##################
 print("Dataset loading...")
 # MNIST Dataset
 transform = transforms.Compose(
@@ -34,6 +34,7 @@ test_loader = torch.utils.data.DataLoader(
 print("Dataset Loaded.")
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
+##################DATA PIPELINE##################
 
 sweep_id = wandb.sweep("config_sweep.yaml", project="gans-iasd")
 
