@@ -1,0 +1,5 @@
+n_epochs: 2
+n_critic: 5  
+clip_value: 0.01
+batch_size: 64  
+z_dim: 100
