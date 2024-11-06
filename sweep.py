@@ -7,6 +7,7 @@ from model import Critic, Generator
 from torchvision import datasets, transforms
 import yaml
 import matplotlib
+from utils import plot_layer_weights
 
 matplotlib.use("Agg")
 
@@ -98,15 +99,9 @@ def train(config):
                 wandb.log(
                     {"Loss Critic": loss_C.item(), "Loss Generator": loss_G.item()}
                 )
-
-    # Log first layer weights heatmap
-    first_layer_weights = list(model_C.parameters())[0].detach().cpu().numpy()
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(first_layer_weights, cmap="viridis", vmin=-clip_value, vmax=clip_value)
-    plt.title("Discriminator First Layer Weights")
-    wandb.log({"Discriminator First Layer Weights": wandb.Image(plt)})
-    plt.close()
-
+        # Log weights of the first layer of the critic
+        first_layer_weights = list(model_C.parameters())[0].detach().cpu().numpy()
+        plot_layer_weights(first_layer_weights, 0.2)
     # Save models
     torch.save(model_G.state_dict(), "checkpoints/W_G_trash.pth")
     torch.save(model_C.state_dict(), "checkpoints/W_C_trash.pth")

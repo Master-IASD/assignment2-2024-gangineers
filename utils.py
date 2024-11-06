@@ -1,7 +1,44 @@
 import torch
 import os
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import wandb
+from model import Discriminator
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
+
+model = Discriminator(d_input_dim=784).to(device)
+# Load the state dict and remove 'module.' prefix
+state_dict = torch.load("checkpoints/D.pth", map_location=device)
+new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+model.load_state_dict(new_state_dict)
+# Extract the weights from the first layer
+weights = model.fc1.weight.data.cpu().numpy()
+
+
+def plot_layer_weights(weights: np.ndarray, clip_value: float):
+    heatmap_weights = weights.copy()
+
+    # Apply a mask: set values > clip_value in absolute to a distinct color (e.g., 2 * clip_value)
+    heatmap_weights[np.abs(weights) > clip_value] = (
+        2 * clip_value
+    )  # Use 2 * clip_value as a placeholder for red
+
+    # Define the colormap with red for values exceeding clip_value
+    cmap = sns.color_palette("viridis", as_cmap=True)
+    cmap.set_over("red")  # Values greater than the color limit are shown in red
+
+    # Plot the heatmap
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(heatmap_weights, cmap=cmap, cbar=True, vmax=clip_value)
+    plt.title("Discriminator First Layer Weights with Clipping Highlighted")
+
+    # Uncomment this line to log to wandb if needed
+    wandb.log({"Discriminator First Layer Weights": wandb.Image(plt)})
+
+    # plt.show()
+    plt.close()
 
 
 def D_train(x, G, D, D_optimizer, criterion):
@@ -61,3 +98,7 @@ def load_model(G, folder="checkpoints/", model_file="G.pth"):
     ckpt = torch.load(os.path.join(folder, model_file), map_location=device)
     G.load_state_dict({k.replace("module.", ""): v for k, v in ckpt.items()})
     return G
+
+
+if __name__ == "__main__":
+    plot_layer_weights(weights, 0.01)
