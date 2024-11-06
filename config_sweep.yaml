@@ -1,0 +1,12 @@
+method: grid
+parameters:
+  n_epochs:
+    value: 2
+  n_critic: 
+    value: 5  
+  clip_value: 
+    values: [0.01, 0.05, 0.1]
+  batch_size: 
+    value: 64  
+  z_dim: 
+    values: [100, 150]

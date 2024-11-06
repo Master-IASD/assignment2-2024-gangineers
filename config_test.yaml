@@ -1,0 +1,9 @@
+method: grid
+metrics:
+  goal: minimize
+  name: score
+parameters:
+  x:
+    values: [1,2,3]
+  y:
+    values: [10,20,30]

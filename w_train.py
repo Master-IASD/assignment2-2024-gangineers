@@ -7,12 +7,9 @@ from model import Critic, Generator
 from torchvision import datasets, transforms
 import yaml
 
-config = yaml.safe_load(open("config_wgan.yaml"))
+config = yaml.safe_load(open("config_sweep.yaml"))
+config = config["parameters"]
 
-wandb.init(
-    project="gans-iasd",
-    config={**config},
-)
 
 # Data Pipeline
 print("Dataset loading...")
@@ -29,97 +26,90 @@ test_dataset = datasets.MNIST(
 )
 
 train_loader = torch.utils.data.DataLoader(
-    dataset=train_dataset, batch_size=config["batch_size"], shuffle=True
+    dataset=train_dataset, batch_size=config["batch_size"]["value"], shuffle=True
 )
 test_loader = torch.utils.data.DataLoader(
-    dataset=test_dataset, batch_size=config["batch_size"], shuffle=False
+    dataset=test_dataset, batch_size=config["batch_size"]["value"], shuffle=False
 )
 print("Dataset Loaded.")
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
-model_G = Generator(g_output_dim=784).to(device)
-model_C = Critic().to(device)
 
-optimizer_G = torch.optim.RMSprop(model_G.parameters(), lr=1e-4)
-optimizer_C = torch.optim.RMSprop(model_C.parameters(), lr=1e-4)
+sweep_id = wandb.sweep("config_sweep.yaml", project="gans-iasd")
 
-for epoch in tqdm(range(config["n_epochs"])):
-    for i, (real_images, _) in enumerate(train_loader):
-        # Move real images to device
-        real_images = real_images.view(-1, 784).to(device)  # Flatten MNIST images
 
-        # ---------------------
-        #  Train Critic
-        # ---------------------
-        for _ in range(config["n_critic"]):
-            # Zero the gradients on the Critic
-            optimizer_C.zero_grad()
+def train():
+    wandb.init(
+        project="gans-iasd",
+        config={**config},
+    )
 
-            # Generate fake images
-            z = torch.randn(config["batch_size"], config["z_dim"]).to(device)
-            fake_images = model_G(
-                z
-            ).detach()  # Detach to avoid gradient computation for Generator
+    # Access sweep parameters from wandb.config directly
+    n_epochs = wandb.config.n_epochs
+    n_critic = wandb.config.n_critic
+    clip_value = wandb.config.clip_value
+    batch_size = wandb.config.batch_size
+    z_dim = wandb.config.z_dim
 
-            # Compute Critic outputs
-            real_validity = model_C(real_images)
-            fake_validity = model_C(fake_images)
+    # Update DataLoader with current batch_size
+    train_loader = torch.utils.data.DataLoader(
+        dataset=train_dataset, batch_size=batch_size, shuffle=True
+    )
 
-            # Compute Wasserstein loss for Critic
-            loss_C = -(torch.mean(real_validity) - torch.mean(fake_validity))
+    model_G = Generator(g_output_dim=784).to(device)
+    model_C = Critic().to(device)
 
-            # Backward and optimize
-            loss_C.backward()
-            optimizer_C.step()
+    optimizer_G = torch.optim.RMSprop(model_G.parameters(), lr=1e-4)
+    optimizer_C = torch.optim.RMSprop(model_C.parameters(), lr=1e-4)
 
-            # Weight clipping
-            for p in model_C.parameters():
-                p.data.clamp_(-config["clip_value"], config["clip_value"])
+    for epoch in tqdm(range(n_epochs)):
+        for i, (real_images, _) in enumerate(train_loader):
+            real_images = real_images.view(-1, 784).to(device)  # Flatten MNIST images
 
-        # ---------------------
-        #  Train Generator
-        # ---------------------
-        # Zero the gradients on the Generator
-        optimizer_G.zero_grad()
+            # Train Critic
+            for _ in range(n_critic):
+                optimizer_C.zero_grad()
+                z = torch.randn(batch_size, z_dim).to(device)
+                fake_images = model_G(z).detach()
+                real_validity = model_C(real_images)
+                fake_validity = model_C(fake_images)
+                loss_C = -(torch.mean(real_validity) - torch.mean(fake_validity))
+                loss_C.backward()
+                optimizer_C.step()
 
-        # Generate fake images
-        z = torch.randn(config["batch_size"], config["z_dim"]).to(device)
-        gen_images = model_G(z)
+                for p in model_C.parameters():
+                    p.data.clamp_(-clip_value, clip_value)
 
-        # Compute Critic output on generated images
-        gen_validity = model_C(gen_images)
+            # Train Generator
+            optimizer_G.zero_grad()
+            z = torch.randn(batch_size, z_dim).to(device)
+            gen_images = model_G(z)
+            gen_validity = model_C(gen_images)
+            loss_G = -torch.mean(gen_validity)
+            loss_G.backward()
+            optimizer_G.step()
 
-        # Compute Generator loss (to maximize the Critic's estimate)
-        loss_G = -torch.mean(gen_validity)
+            # Log Progress
+            if i % 100 == 0:
+                print(
+                    f"Epoch [{epoch}/{n_epochs}] Batch {i}/{len(train_loader)} "
+                    f"Loss C: {loss_C.item():.4f}, Loss G: {loss_G.item():.4f}"
+                )
+                wandb.log(
+                    {"Loss Critic": loss_C.item(), "Loss Generator": loss_G.item()}
+                )
 
-        # Backward and optimize
-        loss_G.backward()
-        optimizer_G.step()
+    # Log first layer weights heatmap
+    first_layer_weights = list(model_C.parameters())[0].detach().cpu().numpy()
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(first_layer_weights, cmap="viridis", vmin=-clip_value, vmax=clip_value)
+    plt.title("Discriminator First Layer Weights")
+    wandb.log({"Discriminator First Layer Weights": wandb.Image(plt)})
+    plt.close()
 
-        # ---------------
-        # Log Progress
-        # ---------------
-        if i % 100 == 0:
-            print(
-                f"Epoch [{epoch}/{config["n_epochs"]}] Batch {i}/{len(train_loader)} \
-                  Loss C: {loss_C.item():.4f}, Loss G: {loss_G.item():.4f}"
-            )
+    # Save models
+    torch.save(model_G.state_dict(), "checkpoints/W_G_trash.pth")
+    torch.save(model_C.state_dict(), "checkpoints/W_C_trash.pth")
 
-first_layer_weights = list(model_C.parameters())[0].detach().cpu().numpy()
 
-# Plot heatmap of the weights
-plt.figure(figsize=(10, 8))
-sns.heatmap(first_layer_weights, cmap="viridis")
-plt.title("Discriminator First Layer Weights")
-
-# Log to wandb
-wandb.log(
-    {"Discriminator First Layer Weights": wandb.Image(plt)}, step=config["n_epochs"]
-)
-
-# Clear the plot
-plt.close()
-
-# Save models
-torch.save(model_G.state_dict(), "checkpoints/W_G_trash.pth")
-torch.save(model_C.state_dict(), "checkpoints/W_C_trash.pth")
+wandb.agent(sweep_id, function=train)
