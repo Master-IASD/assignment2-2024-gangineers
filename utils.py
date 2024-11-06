@@ -4,7 +4,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import wandb
+from torchvision import datasets, transforms
+from typing import Tuple
 from model import Discriminator
+from torch.utils.data import DataLoader
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cuda")
 
@@ -15,6 +18,33 @@ new_state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
 model.load_state_dict(new_state_dict)
 # Extract the weights from the first layer
 weights = model.fc1.weight.data.cpu().numpy()
+
+
+def build_dataloaders_and_datasets() -> (
+    Tuple[DataLoader, DataLoader, datasets.MNIST, datasets.MNIST]
+):
+    """
+    Returns the train and test dataloaders for the MNIST dataset
+    """
+    transform = transforms.Compose(
+        [transforms.ToTensor(), transforms.Normalize(mean=(0.5), std=(0.5))]
+    )
+
+    train_dataset = datasets.MNIST(
+        root="data/MNIST/", train=True, transform=transform, download=True
+    )
+    test_dataset = datasets.MNIST(
+        root="data/MNIST/", train=False, transform=transform, download=False
+    )
+
+    train_loader = torch.utils.data.DataLoader(
+        dataset=train_dataset, batch_size=64, shuffle=True
+    )
+    test_loader = torch.utils.data.DataLoader(
+        dataset=test_dataset, batch_size=64, shuffle=False
+    )
+
+    return train_loader, test_loader, train_dataset, test_dataset
 
 
 def plot_layer_weights(weights: np.ndarray, clip_value: float):

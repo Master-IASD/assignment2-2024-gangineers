@@ -4,33 +4,17 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from model import Critic, Generator
-from torchvision import datasets, transforms
 import yaml
 import matplotlib
-from utils import plot_layer_weights
+from utils import plot_layer_weights, build_dataloaders_and_datasets
 
 matplotlib.use("Agg")
 
 
 ##################DATA PIPELINE##################
 print("Dataset loading...")
-# MNIST Dataset
-transform = transforms.Compose(
-    [transforms.ToTensor(), transforms.Normalize(mean=(0.5), std=(0.5))]
-)
-
-train_dataset = datasets.MNIST(
-    root="data/MNIST/", train=True, transform=transform, download=True
-)
-test_dataset = datasets.MNIST(
-    root="data/MNIST/", train=False, transform=transform, download=False
-)
-
-train_loader = torch.utils.data.DataLoader(
-    dataset=train_dataset, batch_size=64, shuffle=True
-)
-test_loader = torch.utils.data.DataLoader(
-    dataset=test_dataset, batch_size=64, shuffle=False
+train_loader, test_loader, train_dataset, test_dataset = (
+    build_dataloaders_and_datasets()
 )
 print("Dataset Loaded.")
 
