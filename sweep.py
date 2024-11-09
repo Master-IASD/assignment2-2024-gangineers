@@ -80,12 +80,13 @@ def train(config):
                     f"Epoch [{epoch}/{n_epochs}] Batch {i}/{len(train_loader)} "
                     f"Loss C: {loss_C.item():.4f}, Loss G: {loss_G.item():.4f}"
                 )
-                wandb.log(
-                    {"Loss Critic": loss_C.item(), "Loss Generator": loss_G.item()}
-                )
+
+        wandb.log({"Loss Critic": loss_C.item(), "Loss Generator": loss_G.item()})
+
         # Log weights of the first layer of the critic
         first_layer_weights = list(model_C.parameters())[0].detach().cpu().numpy()
         plot_layer_weights(first_layer_weights, 0.2)
+
     # Save models
     torch.save(model_G.state_dict(), "checkpoints/W_G_trash.pth")
     torch.save(model_C.state_dict(), "checkpoints/W_C_trash.pth")
