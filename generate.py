@@ -72,9 +72,9 @@ if __name__ == "__main__":
     # model = load_model(model, 'checkpoints')
     model = torch.nn.DataParallel(model).cuda()
 
-    model_wgan = 120
+    model_wgan = 128
     # Load saved model weights
-    model_path = f'checkpoints_v2/WGAN_GP_{model_wgan}_G.pth'
+    model_path = f'checkpoints/WGAN_GP_{model_wgan}_G.pth'
     model.load_state_dict(torch.load(model_path, weights_only=True))
     model.eval()
 
