@@ -184,8 +184,8 @@ def generate_samples_with_DRS(G, D, num_samples, batch_size, tau):
             total_generated += accepted_samples.size(0)
             total_attempted += batch_size
         
-            if total_generated != 0  and total_generated % 100 == 0:
-                print(f'Generated {total_generated}/{num_samples} samples')
+            # if total_generated != 0  and total_generated % 100 == 0:
+            #     print(f'Generated {total_generated}/{num_samples} samples')
 
     acceptance_rate = total_generated / total_attempted
     print(f'Acceptance Rate: {acceptance_rate:.4f}')
