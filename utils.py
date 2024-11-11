@@ -199,3 +199,33 @@ def generate_samples_with_DRS(G, D, num_samples, batch_size, tau):
     samples = samples[:num_samples]
 
     return samples
+
+
+def l2_norm(tensor):
+    return torch.norm(tensor, dim=1)
+
+def transporter_in_target(D, y, delta=0.001, lr=0.8, epochs=1000):
+    with torch.enable_grad():
+        x = y.clone().detach().requires_grad_(True)
+        for _ in range(epochs):
+            loss = - (D(x).reshape(-1)) + l2_norm(x - y + delta)
+            loss.backward(torch.ones_like(loss), retain_graph=True)      
+            with torch.no_grad():  
+                x -= lr * x.grad
+            x.grad.zero_()
+    
+    return x
+
+
+def transporter_in_latent(G, D, z0, delta=0.001, lr=0.01, epochs=20):
+    with torch.enable_grad():
+        z = z0.clone().detach().requires_grad_(True)
+        for e in range(epochs):
+            loss = - (D(G(z)).reshape(-1)) + l2_norm(z - z0 + delta)
+            loss.backward(torch.ones_like(loss), retain_graph=True)
+            z.grad -= ((z.grad * z).sum(dim=1, keepdim=True)*z)/torch.sqrt(torch.tensor(z0.shape[1], dtype=torch.float32))   
+            with torch.no_grad():  
+                z -= lr * z.grad
+            z.grad.zero_()
+
+    return z
