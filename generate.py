@@ -126,5 +126,70 @@ if __name__ == '__main__':
     num_samples = 10000
     batch_size = 100
 
+    print('Start Generating')
+    os.makedirs('samples', exist_ok=True)
+
+    n_o_samples = 0
+    n_samples = 0
+
+    # c =[1,1.5,2,2.5,3]
+
+
+    # n_samples_d = {}
+    # for i in c:
+    #     n_samples_d[f'{i}'] = 0
+    # with torch.no_grad():
+    #     while n_o_samples<10:
+    #         z = torch.randn(args.batch_size, 100).cuda()
+    #         x = G(z)
+    #         x = x.reshape(args.batch_size, 28, 28)
+    #         for k in range(x.shape[0]):
+    #             if n_o_samples<10:
+    #                 torchvision.utils.save_image(x[k:k+1], os.path.join('samples', f'Original_{n_o_samples}.png'))   
+    #                 n_o_samples += 1      
+    #         x = x.reshape(args.batch_size,784)
+
+    #         for i in c:
+    #             s = f'{i}'
+    #             os.makedirs(f'c{i}', exist_ok=True)
+    #             new_x = transporter_in_target(D, K, x,c=i)
+    #             new_x = new_x.reshape(args.batch_size, 28, 28)
+    #             for k in range(new_x.shape[0]):
+    #                 if n_samples_d[s]<n_o_samples:
+    #                     torchvision.utils.save_image(new_x[k:k+1], os.path.join(f'c{i}', f'{n_samples_d[s]}.png'))         
+    #                     n_samples_d[s] += 1
+    #     print(n_samples_d)
+
+
+
+    with torch.no_grad():
+            while n_samples<100:
+                z = torch.randn(batch_size, 100).cuda().requires_grad_(True)
+                x = G(z)
+                x = x.reshape(batch_size, 28, 28)
+                for k in range(x.shape[0]):
+                    if n_samples<100:
+                        torchvision.utils.save_image(x[k:k+1], os.path.join('samples', f'{n_samples}.png'))         
+                        n_samples += 1
+
+
+                # os.makedirs(f'imprv_samples', exist_ok=True)
+                # new_z = transporter_in_latent(G, D, k, z)
+                # x = G(new_z)
+                # x = x.reshape(args.batch_size, 28, 28)
+                # for k in range(x.shape[0]):
+                #     if n_o_samples<n_samples:
+                #         torchvision.utils.save_image(x[k:k+1], os.path.join('imprv_samples', f'{n_o_samples}.png'))         
+                #         n_o_samples += 1
+
+                # x = x.reshape(args.batch_size, 784)
+                # new_x = transporter_in_target(D, K, x)
+                # new_x = new_x.reshape(args.batch_size, 28, 28)
+                # for k in range(new_x.shape[0]):
+                #     if n_o_samples<n_samples:
+                #         torchvision.utils.save_image(new_x[k:k+1], os.path.join('imprv_samples', f'{n_o_samples}.png'))         
+                #         n_o_samples += 1
+
+
     
     
