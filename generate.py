@@ -123,17 +123,8 @@ if __name__ == '__main__':
 
 
     # Parameters
-    tau = 4.5  # Adjust tau as needed
     num_samples = 10000
     batch_size = 100
 
-    # Generate samples with DRS
-    print(f'Generating {num_samples} samples with DRS (tau={tau})...')
-    samples = generate_samples_with_DRS(G, D, num_samples, batch_size, tau)
-
-    # Save samples
-    os.makedirs('samples', exist_ok=True)
-    for idx in range(samples.size(0)):
-        vutils.save_image(samples[idx].view(1, 28, 28),
-                          f'samples/{idx}.png',
-                          normalize=True)
+    
+    
