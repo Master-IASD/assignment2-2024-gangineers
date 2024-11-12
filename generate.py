@@ -18,15 +18,15 @@
 #     D = torch.nn.DataParallel(D)
 
 
-#     model_wgan = 120
+#     model_wgan = 128
 #     # Load saved model weights
-#     G.load_state_dict(torch.load(f'checkpoints_v2/WGAN_GP_{model_wgan}_G.pth', weights_only=True))
-#     D.load_state_dict(torch.load(f'checkpoints_v2/WGAN_GP_{model_wgan}_D.pth', weights_only=True))
+#     G.load_state_dict(torch.load(f'checkpoints_v3/WGAN_GP_{model_wgan}_G.pth', weights_only=True))
+#     D.load_state_dict(torch.load(f'checkpoints_v3/WGAN_GP_{model_wgan}_D.pth', weights_only=True))
 
 
 #     # Parameters
 #     tau = -10000  # Adjust tau as needed
-#     num_samples = 3000
+#     num_samples = 10000
 #     batch_size = 100
 
 #     # Generate samples with DRS
@@ -66,9 +66,9 @@ if __name__ == '__main__':
     # model = load_model(model, 'checkpoints')
     model = torch.nn.DataParallel(model).cuda()
 
-    model_wgan = 120
+    model_wgan = 128
     # Load saved model weights
-    model_path = f'checkpoints_v2/WGAN_GP_{model_wgan}_G.pth'
+    model_path = f'checkpoints_v3/WGAN_GP_{model_wgan}_G.pth'
     model.load_state_dict(torch.load(model_path, weights_only=True))
     model.eval()
 

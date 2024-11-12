@@ -1,400 +1,234 @@
 #!/usr/bin/env python3
 import os
-from functools import partial
-from collections import namedtuple
+import argparse
 from glob import glob
+from tqdm import tqdm
 import numpy as np
 from PIL import Image
-from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-
-try:
-    from tqdm import tqdm, trange
-except ImportError:
-    def tqdm(x, desc=''):
-        if len(desc) > 0:
-            print(desc)
-        return x
-
-    def trange(x, desc=''):
-        if len(desc) > 0:
-            print(desc)
-        return range(x)
 
 import torch
-import torchvision.models as models
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms, datasets
+from torchvision import transforms, models, datasets
 from torchvision.utils import save_image
 
+# Define namedtuples for structured data
+from collections import namedtuple
 Manifold = namedtuple('Manifold', ['features', 'radii'])
 PrecisionAndRecall = namedtuple('PrecisionAndRecall', ['precision', 'recall'])
 
 def convert_mnist_to_images(output_dir, num_images=100):
+    """
+    Convert MNIST dataset images to PNG format and save them to the specified directory.
+    """
     os.makedirs(output_dir, exist_ok=True)
     transform = transforms.Compose([transforms.ToTensor()])
     mnist_data = datasets.MNIST(root='data/MNIST', train=True, transform=transform, download=True)
 
-    for i in range(num_images):
+    for i in tqdm(range(num_images), desc='Converting MNIST to Images'):
         img, label = mnist_data[i]
         save_image(img, os.path.join(output_dir, f'real_{i}.png'))
     print(f"Converted {num_images} MNIST images to PNG format in '{output_dir}'.")
 
+class ImageDataset(Dataset):
+    """
+    Custom Dataset for loading images from a directory.
+    """
+    def __init__(self, root, transform=None, num_samples=-1):
+        self.fnames = glob(os.path.join(root, '**', '*.jpg'), recursive=True) + \
+                      glob(os.path.join(root, '**', '*.png'), recursive=True) + \
+                      glob(os.path.join(root, '**', '*.jpeg'), recursive=True)
+        if num_samples > 0:
+            self.fnames = self.fnames[:num_samples]
+        self.transform = transform
 
+    def __len__(self):
+        return len(self.fnames)
 
-class IPR():
-    def __init__(self, batch_size=50, k=3, num_samples=10000, model=None):
-        self.manifold_ref = None
+    def __getitem__(self, idx):
+        image_path = self.fnames[idx]
+        image = Image.open(image_path).convert('RGB')
+        if self.transform:
+            image = self.transform(image)
+        return image
+
+class PrecisionRecallEvaluator:
+    """
+    Class to compute Precision and Recall for GANs using feature embeddings.
+    """
+    def __init__(self, device='cuda', batch_size=64, k=3, num_workers=4):
+        self.device = device
         self.batch_size = batch_size
         self.k = k
-        self.num_samples = num_samples
-        if model is None:
-            print('loading vgg16 for improved precision and recall...', end='', flush=True)
-            self.vgg16 = models.vgg16(pretrained=True).cuda().eval()
-            print('done')
-        else:
-            self.vgg16 = model
+        self.num_workers = num_workers
+        self.model = self._load_model()
 
-    def __call__(self, subject):
-        return self.precision_and_recall(subject)
-
-    def precision_and_recall(self, subject):
-        '''
-        Compute precision and recall for given subject
-        reference should be precomputed by IPR.compute_manifold_ref()
-        args:
-            subject: path or images
-                path: a directory containing images or precalculated .npz file
-                images: torch.Tensor of N x C x H x W
-        returns:
-            PrecisionAndRecall
-        '''
-        assert self.manifold_ref is not None, "call IPR.compute_manifold_ref() first"
-
-        manifold_subject = self.compute_manifold(subject)
-        precision = compute_metric(self.manifold_ref, manifold_subject.features, 'computing precision...')
-        recall = compute_metric(manifold_subject, self.manifold_ref.features, 'computing recall...')
-        return PrecisionAndRecall(precision, recall)
-
-    def compute_manifold_ref(self, path):
-        self.manifold_ref = self.compute_manifold(path)
-
-    def realism(self, image):
-        '''
-        args:
-            image: torch.Tensor of 1 x C x H x W
-        '''
-        feat = self.extract_features(image)
-        return realism(self.manifold_ref, feat)
-
-    def compute_manifold(self, input):
-        '''
-        Compute manifold of given input
-        args:
-            input: path or images, same as above
-        returns:
-            Manifold(features, radii)
-        '''
-        # features
-        if isinstance(input, str):
-            if input.endswith('.npz'):  # input is precalculated file
-                print('loading', input)
-                f = np.load(input)
-                feats = f['feature']
-                radii = f['radii']
-                f.close()
-                return Manifold(feats, radii)
-            else:  # input is dir
-                feats = self.extract_features_from_files(input)
-        elif isinstance(input, torch.Tensor):
-            feats = self.extract_features(input)
-        elif isinstance(input, np.ndarray):
-            input = torch.Tensor(input)
-            feats = self.extract_features(input)
-        elif isinstance(input, list):
-            if isinstance(input[0], torch.Tensor):
-                input = torch.cat(input, dim=0)
-                feats = self.extract_features(input)
-            elif isinstance(input[0], np.ndarray):
-                input = np.concatenate(input, axis=0)
-                input = torch.Tensor(input)
-                feats = self.extract_features(input)
-            elif isinstance(input[0], str):  # input is list of fnames
-                feats = self.extract_features_from_files(input)
-            else:
-                raise TypeError
-        else:
-            print(type(input))
-            raise TypeError
-
-        # radii
-        distances = compute_pairwise_distances(feats)
-        radii = distances2radii(distances, k=self.k)
-        return Manifold(feats, radii)
-
-    def extract_features(self, images):
+    def _load_model(self):
         """
-        Extract features of vgg16-fc2 for all images
-        params:
-            images: torch.Tensors of size N x C x H x W
-        returns:
-            A numpy array of dimension (num images, dims)
+        Load a pretrained InceptionV3 model for feature extraction.
         """
-        desc = 'extracting features of %d images' % images.size(0)
-        num_batches = int(np.ceil(images.size(0) / self.batch_size))
-        _, _, height, width = images.shape
-        if height != 224 or width != 224:
-            print('IPR: resizing %s to (224, 224)' % str((height, width)))
-            resize = partial(F.interpolate, size=(224, 224))
-        else:
-            def resize(x): return x
+        print("Loading InceptionV3 model for feature extraction...")
+        model = models.inception_v3(pretrained=True, transform_input=False)
+        # Remove the final classification layer
+        model.fc = torch.nn.Identity()
+        model.to(self.device)
+        model.eval()
+        print("InceptionV3 model loaded.")
+        return model
 
+    def _extract_features(self, dataloader):
+        """
+        Extract features from images using the pretrained model.
+        """
         features = []
-        for bi in trange(num_batches, desc=desc):
-            start = bi * self.batch_size
-            end = start + self.batch_size
-            batch = images[start:end]
-            batch = resize(batch)
-            before_fc = self.vgg16.features(batch.cuda())
-            before_fc = before_fc.view(-1, 7 * 7 * 512)
-            feature = self.vgg16.classifier[:4](before_fc)
-            features.append(feature.cpu().data.numpy())
+        with torch.no_grad():
+            for batch in tqdm(dataloader, desc='Extracting Features'):
+                batch = batch.to(self.device)
+                # InceptionV3 expects 299x299 images
+                if batch.shape[2] != 299 or batch.shape[3] != 299:
+                    batch = F.interpolate(batch, size=(299, 299), mode='bilinear', align_corners=False)
+                feats = self.model(batch)
+                features.append(feats.cpu())
+        features = torch.cat(features, dim=0)
+        return features
 
-        return np.concatenate(features, axis=0)
-
-    def extract_features_from_files(self, path_or_fnames):
+    def compute_manifold(self, dataloader):
         """
-        Extract features of vgg16-fc2 for all images in path
-        params:
-            path_or_fnames: dir containing images or list of fnames(str)
-        returns:
-            A numpy array of dimension (num images, dims)
+        Compute the manifold (features and radii) for a given dataset.
         """
+        features = self._extract_features(dataloader)
+        # Compute radii based on k-NN
+        radii = self._compute_radii(features)
+        return Manifold(features=features, radii=radii)
 
-        dataloader = get_custom_loader(path_or_fnames, batch_size=self.batch_size, num_samples=self.num_samples)
-        num_found_images = len(dataloader.dataset)
-        desc = 'extracting features of %d images' % num_found_images
-        if num_found_images < self.num_samples:
-            print('WARNING: num_found_images(%d) < num_samples(%d)' % (num_found_images, self.num_samples))
+    def _compute_radii(self, features):
+        """
+        Compute radii for each feature vector based on k-NN distances.
+        """
+        print("Computing radii for k-NN...")
+        # Normalize features
+        features_norm = F.normalize(features, p=2, dim=1)
+        # Compute cosine similarity
+        similarity = torch.mm(features_norm, features_norm.t())
+        # Convert similarity to distance
+        distance = 1 - similarity
+        # Fill diagonal with large value to exclude self-distance
+        distance.fill_diagonal_(float('inf'))
+        # Find k-nearest neighbors
+        radii, _ = torch.topk(distance, self.k, dim=1, largest=False)
+        radii = radii[:, -1]  # The k-th smallest distance
+        return radii.cpu()
 
-        features = []
-        for batch in tqdm(dataloader, desc=desc):
-            before_fc = self.vgg16.features(batch.cuda())
-            before_fc = before_fc.view(-1, 7 * 7 * 512)
-            feature = self.vgg16.classifier[:4](before_fc)
-            features.append(feature.cpu().data.numpy())
+    def compute_precision_recall(self, real_loader, fake_loader):
+        """
+        Compute Precision and Recall between real and fake datasets.
+        """
+        print("Computing manifold for real images...")
+        real_manifold = self.compute_manifold(real_loader)
 
-        return np.concatenate(features, axis=0)
+        print("Computing manifold for fake images...")
+        fake_manifold = self.compute_manifold(fake_loader)
 
-    def save_ref(self, fname):
-        print('saving manifold to', fname, '...')
-        np.savez_compressed(fname,
-                            feature=self.manifold_ref.features,
-                            radii=self.manifold_ref.radii)
+        # Normalize features
+        real_features = F.normalize(real_manifold.features, p=2, dim=1).to(self.device)  # (N_real, D)
+        fake_features = F.normalize(fake_manifold.features, p=2, dim=1).to(self.device)  # (N_fake, D)
 
+        # Compute pairwise distances
+        print("Computing pairwise distances...")
+        # Efficient computation using batch processing to avoid memory issues
+        N_real = real_features.size(0)
+        N_fake = fake_features.size(0)
+        batch_size = self.batch_size
+        precision_count = 0
+        recall_count = 0
 
-def compute_pairwise_distances(X, Y=None):
-    '''
-    args:
-        X: np.array of shape N x dim
-        Y: np.array of shape N x dim
-    returns:
-        N x N symmetric np.array
-    '''
-    num_X = X.shape[0]
-    if Y is None:
-        num_Y = num_X
-    else:
-        num_Y = Y.shape[0]
-    X = X.astype(np.float64)  # to prevent underflow
-    X_norm_square = np.sum(X**2, axis=1, keepdims=True)
-    if Y is None:
-        Y_norm_square = X_norm_square
-    else:
-        Y_norm_square = np.sum(Y**2, axis=1, keepdims=True)
-    X_square = np.repeat(X_norm_square, num_Y, axis=1)
-    Y_square = np.repeat(Y_norm_square.T, num_X, axis=0)
-    if Y is None:
-        Y = X
-    XY = np.dot(X, Y.T)
-    diff_square = X_square - 2*XY + Y_square
+        # Precision: How much of the fake data lies within the real data manifold
+        print("Calculating Precision...")
+        for i in tqdm(range(0, N_fake, batch_size), desc='Precision Calculation'):
+            end = min(i + batch_size, N_fake)
+            batch = fake_features[i:end]  # (batch_size, D)
+            # Compute cosine similarity
+            similarity = torch.mm(batch, real_features.t())  # (batch_size, N_real)
+            distance = 1 - similarity  # (batch_size, N_real)
+            # Compare with real radii
+            radii = real_manifold.radii.unsqueeze(0).to(self.device)  # (1, N_real)
+            within_radius = (distance < radii)  # (batch_size, N_real)
+            precision_count += within_radius.any(dim=1).sum().item()
 
-    # check negative distance
-    min_diff_square = diff_square.min()
-    if min_diff_square < 0:
-        idx = diff_square < 0
-        diff_square[idx] = 0
-        print('WARNING: %d negative diff_squares found and set to zero, min_diff_square=' % idx.sum(),
-              min_diff_square)
+        precision = precision_count / N_fake
 
-    distances = np.sqrt(diff_square)
-    return distances
+        # Recall: How much of the real data manifold is covered by fake data
+        print("Calculating Recall...")
+        for i in tqdm(range(0, N_real, batch_size), desc='Recall Calculation'):
+            end = min(i + batch_size, N_real)
+            batch = real_features[i:end]  # (batch_size, D)
+            # Compute cosine similarity
+            similarity = torch.mm(batch, fake_features.t())  # (batch_size, N_fake)
+            distance = 1 - similarity  # (batch_size, N_fake)
+            # Compare with fake radii
+            radii = fake_manifold.radii.unsqueeze(0).to(self.device)  # (1, N_fake)
+            within_radius = (distance < radii)  # (batch_size, N_fake)
+            recall_count += within_radius.any(dim=1).sum().item()
 
+        recall = recall_count / N_real
 
-def distances2radii(distances, k=3):
-    num_features = distances.shape[0]
-    radii = np.zeros(num_features)
-    for i in range(num_features):
-        radii[i] = get_kth_value(distances[i], k=k)
-    return radii
+        return PrecisionAndRecall(precision=precision, recall=recall)
 
-
-def get_kth_value(np_array, k):
-    kprime = k+1  # kth NN should be (k+1)th because closest one is itself
-    idx = np.argpartition(np_array, kprime)
-    k_smallests = np_array[idx[:kprime]]
-    kth_value = k_smallests.max()
-    return kth_value
-
-
-def compute_metric(manifold_ref, feats_subject, desc=''):
-    num_subjects = feats_subject.shape[0]
-    count = 0
-    dist = compute_pairwise_distances(manifold_ref.features, feats_subject)
-    for i in trange(num_subjects, desc=desc):
-        count += (dist[:, i] < manifold_ref.radii).any()
-    return count / num_subjects
-
-
-def is_in_ball(center, radius, subject):
-    return distance(center, subject) < radius
-
-
-def distance(feat1, feat2):
-    return np.linalg.norm(feat1 - feat2)
-
-
-def realism(manifold_real, feat_subject):
-    feats_real = manifold_real.features
-    radii_real = manifold_real.radii
-    diff = feats_real - feat_subject
-    dists = np.linalg.norm(diff, axis=1)
-    eps = 1e-6
-    ratios = radii_real / (dists + eps)
-    max_realism = float(ratios.max())
-    return max_realism
-
-
-class ImageFolder(Dataset):
-    def __init__(self, root, transform=None):
-        # self.fnames = list(map(lambda x: os.path.join(root, x), os.listdir(root)))
-        self.fnames = glob(os.path.join(root, '**', '*.jpg'), recursive=True) + \
-            glob(os.path.join(root, '**', '*.png'), recursive=True)
-
-        self.transform = transform
-
-    def __getitem__(self, index):
-        image_path = self.fnames[index]
-        image = Image.open(image_path).convert('RGB')
-        if self.transform is not None:
-            image = self.transform(image)
-        return image
-
-    def __len__(self):
-        return len(self.fnames)
-
-
-class FileNames(Dataset):
-    def __init__(self, fnames, transform=None):
-        self.fnames = fnames
-        self.transform = transform
-
-    def __getitem__(self, index):
-        image_path = self.fnames[index]
-        image = Image.open(image_path).convert('RGB')
-        if self.transform is not None:
-            image = self.transform(image)
-        return image
-
-    def __len__(self):
-        return len(self.fnames)
-
-
-def get_custom_loader(image_dir_or_fnames, image_size=224, batch_size=50, num_workers=4, num_samples=-1):
-    transform = []
-    transform.append(transforms.Resize([image_size, image_size]))
-    transform.append(transforms.ToTensor())
-    transform.append(transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                          std=[0.229, 0.224, 0.225]))
-    transform = transforms.Compose(transform)
-
-    if isinstance(image_dir_or_fnames, list):
-        dataset = FileNames(image_dir_or_fnames, transform)
-    elif isinstance(image_dir_or_fnames, str):
-        dataset = ImageFolder(image_dir_or_fnames, transform=transform)
-    else:
-        raise TypeError
-
-    if num_samples > 0:
-        dataset.fnames = dataset.fnames[:num_samples]
-    data_loader = DataLoader(dataset=dataset,
-                             batch_size=batch_size,
-                             shuffle=False,
-                             num_workers=num_workers,
-                             pin_memory=True)
-    return data_loader
-
-
-def toy():
-    offset = 2
-    feats_real = np.random.rand(10).reshape(-1, 1)
-    feats_fake = np.random.rand(10).reshape(-1, 1) + offset
-    feats_real[0] = offset
-    feats_fake[0] = 1
-    print('real:', feats_real)
-    print('fake:', feats_fake)
-
-    print('computing pairwise distances...')
-    distances_real = compute_pairwise_distances(feats_real)
-    print('distances to radii...')
-    radii_real = distances2radii(distances_real)
-    manifold_real = Manifold(feats_real, radii_real)
-
-    print('computing pairwise distances...')
-    distances_fake = compute_pairwise_distances(feats_fake)
-    print('distances to radii...')
-    radii_fake = distances2radii(distances_fake)
-    manifold_fake = Manifold(feats_fake, radii_fake)
-
-    precision = compute_metric(manifold_real, feats_fake)
-    recall = compute_metric(manifold_fake, feats_real)
-    print('precision:', precision)
-    print('recall:', recall)
-
-
-if __name__ == '__main__':
-    parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
-    parser.add_argument('path_real', type=str, help='Path to the real images')
-    parser.add_argument('path_fake', type=str, help='Path to the fake images')
-    parser.add_argument('--batch_size', type=int, default=50, help='Batch size to use')
-    parser.add_argument('--k', type=int, default=3, help='Value for k-NN radius computation')
-    parser.add_argument('--num_samples', type=int, default=5000, help='Number of samples to use')
-    parser.add_argument('--toy', action='store_true')
-    parser.add_argument('--fname_precalc', type=str, default='', help='Filename for precalculating manifold')
+def main():
+    parser = argparse.ArgumentParser(description='Efficient Precision and Recall Calculation for GANs')
+    parser.add_argument('path_real', type=str, help='Path to the real images directory')
+    parser.add_argument('path_fake', type=str, help='Path to the fake images directory')
+    parser.add_argument('--batch_size', type=int, default=64, help='Batch size for feature extraction')
+    parser.add_argument('--k', type=int, default=3, help='k value for k-NN radius computation')
+    parser.add_argument('--num_samples_real', type=int, default=-1, help='Number of real samples to use (-1 for all)')
+    parser.add_argument('--num_samples_fake', type=int, default=-1, help='Number of fake samples to use (-1 for all)')
+    parser.add_argument('--num_workers', type=int, default=4, help='Number of workers for DataLoader')
+    parser.add_argument('--device', type=str, default='cuda', help='Device to use (cuda or cpu)')
     parser.add_argument('--conversion', '-c', action='store_true', help='Convert MNIST binary files to images')
-
+    parser.add_argument('--num_convert', type=int, default=1000, help='Number of MNIST images to convert')
     args = parser.parse_args()
 
-    # Conversion flag handling
+    # Handle conversion flag
     if args.conversion:
-        output_dir = 'real_images'  # Define the output directory for converted images
-        convert_mnist_to_images(output_dir, num_images=int(args.num_samples / 10))
-        args.path_real = output_dir  # Update path_real to point to the converted images directory
+        print("Converting MNIST binary files to images...")
+        convert_mnist_to_images(output_dir=args.path_real, num_images=args.num_convert)
+        print("Conversion completed.")
 
-    # Continue with precision and recall calculations...
-    ipr = IPR(args.batch_size, args.k, args.num_samples)
-    with torch.no_grad():
-        # Compute the reference manifold for real images
-        ipr.compute_manifold_ref(args.path_real)
+    # Define transforms
+    transform = transforms.Compose([
+        transforms.Resize((299, 299)),  # InceptionV3 expects 299x299 images
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],  # ImageNet mean
+                             std=[0.229, 0.224, 0.225])   # ImageNet std
+    ])
 
-        # Save and exit for precalc
-        if len(args.fname_precalc) > 0:
-            ipr.save_ref(args.fname_precalc)
-            print('path_fake (%s) is ignored for precalc' % args.path_fake)
-            exit()
+    # Create datasets and dataloaders
+    print("Loading real images...")
+    real_dataset = ImageDataset(root=args.path_real, transform=transform, num_samples=args.num_samples_real)
+    real_loader = DataLoader(real_dataset, batch_size=args.batch_size, shuffle=False,
+                             num_workers=args.num_workers, pin_memory=True)
 
-        # Fake image precision and recall
-        precision, recall = ipr.precision_and_recall(args.path_fake)
+    print("Loading fake images...")
+    fake_dataset = ImageDataset(root=args.path_fake, transform=transform, num_samples=args.num_samples_fake)
+    fake_loader = DataLoader(fake_dataset, batch_size=args.batch_size, shuffle=False,
+                             num_workers=args.num_workers, pin_memory=True)
 
-    print('precision:', precision)
-    print('recall:', recall)
+    # Initialize evaluator
+    evaluator = PrecisionRecallEvaluator(device=args.device, batch_size=args.batch_size, k=args.k,
+                                        num_workers=args.num_workers)
+
+    # Compute Precision and Recall
+    print("Starting Precision and Recall computation...")
+    precision_recall = evaluator.compute_precision_recall(real_loader, fake_loader)
+    print(f"Precision: {precision_recall.precision:.4f}")
+    print(f"Recall: {precision_recall.recall:.4f}")
+
+    # Optionally, save the results
+    results_path = 'precision_recall_results.txt'
+    with open(results_path, 'w') as f:
+        f.write(f"Precision: {precision_recall.precision:.4f}\n")
+        f.write(f"Recall: {precision_recall.recall:.4f}\n")
+    print(f"Results saved to {results_path}")
+
+if __name__ == '__main__':
+    main()
